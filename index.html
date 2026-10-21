@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradingBot — Work Summary, Strategies and Data</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--mut:#5b6573;--line:#dfe3e8;--ok:#1a7f4b;--bad:#b3261e;--warn:#9a6700;--acc:#1f4e9c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+header{background:#14233c;color:#fff;padding:28px 32px}
+header h1{margin:0 0 6px;font-size:26px}
+header p{margin:0;color:#c5d0e3}
+nav{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:10px 32px;z-index:5;display:flex;flex-wrap:wrap;gap:6px 18px}
+nav a{color:var(--acc);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+main{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 24px;margin:20px 0}
+h2{margin:0 0 12px;font-size:21px;border-bottom:2px solid var(--line);padding-bottom:8px}
+h3{margin:20px 0 8px;font-size:17px}
+table{border-collapse:collapse;width:100%;margin:10px 0 14px;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f5;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}.warn{color:var(--warn);font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:12px 0}
+.card{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fbfcfd}
+.card b{display:block;font-size:24px}.card span{color:var(--mut);font-size:13px}
+.note{background:#fff8e1;border-left:4px solid #e0a800;padding:10px 14px;margin:12px 0;border-radius:4px}
+.key{background:#eaf3ff;border-left:4px solid var(--acc);padding:10px 14px;margin:12px 0;border-radius:4px}
+code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:13px}
+ul{margin:6px 0 10px;padding-left:22px}
+footer{color:var(--mut);font-size:13px;text-align:center;padding:20px}
+</style></head><body>
+<header><h1>TradingBot — What Was Built, Tested and Found</h1>
+<p>Work log 19–21 Oct 2026 · Compiled from project files, commits and the results archive</p></header>
+<nav><a href="#summary">Summary</a><a href="#data">Data sources</a><a href="#build">What was built</a><a href="#nse-intraday">NSE intraday</a><a href="#ml">ML filter</a><a href="#explore">Indicator search</a><a href="#nse-swing">NSE swing</a><a href="#crypto">Crypto (SOL)</a><a href="#method">Method and safeguards</a><a href="#mistakes">Problems</a><a href="#next">Open items</a></nav>
+<main>
+<section id="summary"><h2>1. Executive summary</h2>
+<div class="cards">
+<div class="card"><b>0 / ~1,500</b><span>strategy variants (trials) passed their pre-registered criteria (NSE + crypto)</span></div>
+<div class="card"><b>0</b><span>strategies that passed (one lead, SOL 1h shorts, is suggested for a paper test only)</span></div>
+<div class="card"><b>813</b><span>automated tests on the bot code (CI green, ~98% coverage)</span></div>
+<div class="card"><b>2 markets</b><span>NSE India (equities, daily futures) and crypto (SOL, BTC)</span></div>
+</div>
+<div class="key"><b>Bottom line.</b> The software (data layer, indicators, strategies, risk, backtester, ML filter) is built and audited. Every strategy tested, on both NSE and SOL, was <b>not profitable after realistic costs</b>. Gross edge was close to zero; costs consumed the rest. Nothing is ready for live money.</div>
+<ul>
+<li><b>Built:</b> milestones M0–M4.1 plus ML1 (LightGBM filter) and a results dashboard. M5 (live feed and Telegram alerts), M6 (AI review) and M7 (deployment) are <i>not started</i>.</li>
+<li><b>NSE intraday (1m–60m):</b> net loss in every tested form; gross ≈ 0 to +0.03R per trade, costs ≈ 0.9R per trade at tight stops.</li>
+<li><b>NSE swing (daily/4h):</b> 0 of 300 variants passed. Best one (+0.32R in 2024) is probably market drift; deflated Sharpe 0.04 (needs 0.5).</li>
+<li><b>ML filter (LightGBM):</b> high AUC (0.84–0.89) only reflects stop/target geometry; no directional edge. OOS loss reduced only by trading less.</li>
+<li><b>Crypto SOL:</b> 8 studies, 0 passed. The only mildly consistent pattern is 1h shorts (+0.11 to +0.30R in 2024), but it fails the significance bar and is contaminated by repeated looking.</li>
+<li><b>Recommendation on record:</b> stop historical parameter-mining; if continuing, run a pre-registered paper test on fresh forward data.</li>
+</ul>
+<div class="note"><b>Unit note.</b> <b>R</b> = profit in multiples of the initial risk (distance entry→stop). −1R = a full stop-out. "Net" = after all costs; "gross" = before costs.</div>
+</section>
+
+<section id="data"><h2>2. Data and where it came from</h2>
+<h3>2.1 Datasets</h3>
+<table><tr><th>Dataset</th><th>Source</th><th>Coverage</th><th>Size</th><th>Used for</th></tr>
+<tr><td><b>NSE equities, 1-minute candles</b><br>24 large-caps + NIFTY 50 index</td><td>Upstox public historical-candle API (worked <i>without</i> a login token; 1-month ranges per call)</td><td>2022-01-03 → 2026-10-16<br>1,188 trading days per symbol</td><td>≈443,600 bars per symbol<br>25 parquet files</td><td>All NSE intraday and swing backtests, ML1, indicator search</td></tr>
+<tr><td><b>NSE futures, daily</b><br>stock + index futures</td><td>NSE F&amp;O bhavcopy (old and UDiFF formats), official daily files</td><td>2022-01-03 → 2026-10-16<br>1,182 trading days</td><td>716,167 rows; 307 symbols (698k stock futures, 18k index futures); raw zips incl. options kept</td><td>Downloaded for future work; <b>I found no strategy study that used it</b> (not exhaustively checked)</td></tr>
+<tr><td><b>SOL/USDT 1-minute</b></td><td>Binance public data (<code>data.binance.vision</code>, spot monthly klines, SHA-256 checksum verified)</td><td>2021-01-01 → 2026-09-30</td><td>3,021,486 rows</td><td>All crypto studies</td></tr>
+<tr><td><b>BTC/USDT 1-minute</b></td><td>Same as above</td><td>2021-01-01 → 2026-09-30</td><td>3,021,487 rows</td><td>BTC confirmation filter and control</td></tr>
+<tr><td><b>Synthetic candles</b></td><td>Generated in the test suite</td><td>n/a</td><td>n/a</td><td>Unit tests for M1–M3.5 (first milestones were built before real data was available)</td></tr></table>
+
+<h3>2.2 NSE universe (24 stocks + index)</h3>
+<p>Original five: RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS (plus NIFTY 50 index as context). Added later: SBIN, AXISBANK, KOTAKBANK, LT, ITC, HINDUNILVR, BHARTIARTL, BAJFINANCE, MARUTI, SUNPHARMA, TATASTEEL, M&amp;M, HCLTECH, WIPRO, ASIANPAINT, TITAN, ULTRACEMCO, NTPC, POWERGRID. TATAMOTORS was skipped (demerger).</p>
+
+<h3>2.3 Data quality findings</h3>
+<table><tr><th>Dataset</th><th>Finding</th></tr>
+<tr><td>NSE 1m</td><td>No symbol missing any day vs NIFTY 50; about 7–8 short days per symbol; 0.2% zero-volume bars. NIFTY 50 index has zero volume (so it is context-only, not tradable). Data is split-adjusted; five gaps &gt;8% were checked and are real events.</td></tr>
+<tr><td>NSE holidays</td><td>Inferred from the data (68 missing weekdays in the F&amp;O file ≈ 12–16 per year); <span class="warn">not yet verified against the official NSE list</span>.</td></tr>
+<tr><td>Crypto 1m</td><td>1,074 missing minutes in SOL (1,073 BTC) out of 3.02M; 7 gaps ≥30 min (largest 284 min, 25 Apr 2021); 750 zero-volume bars in SOL; no duplicates.</td></tr></table>
+
+<h3>2.4 Cost assumptions used in tests</h3>
+<table><tr><th>Market</th><th>Costs applied</th></tr>
+<tr><td>NSE intraday</td><td>Brokerage min(₹20, 0.03%) and a flat-₹20 sensitivity; SEBI turnover fee and spread are confirmed in the code history; other statutory charges follow the project cost model (not itemised here); slippage 0.05% per leg. Position size ₹10,000 per signal, with a ₹10k / 50k / 1L / 5L size sweep.</td></tr>
+<tr><td>NSE swing</td><td>Delivery charges incl. STT 0.1% on both legs and DP charges; brokerage ₹0 and ₹20 cases.</td></tr>
+<tr><td>Crypto (early)</td><td>Binance-style 0.10% fee + 0.05% slippage per side.</td></tr>
+<tr><td>Crypto (later, CMC Markets CFD)</td><td>Spread 0.34% round trip (quote 104.83 / 105.185); overnight holding: longs pay ~0.1%/day, shorts earn ~0.05%/day; a ×1.5 cost stress case.</td></tr></table>
+<div class="note"><b>Caveats.</b> Upstox licence terms were not reviewed (personal research only). Binance prices are not CMC prices; CMC CFD costs were applied as a cost model on Binance candles. Historical F&amp;O intraday data is not available in free sources.</div>
+</section>
+<section id="build"><h2>3. What was built (software)</h2>
+<p>Repository: <code>gauravtalwar0-del/trading-bot</code> (private). Python 3.11, CI on GitHub Actions. Every milestone was built by background worker agents, then reviewed and merged by me; mutation checks confirmed the key tests actually catch bugs.</p>
+<table><tr><th>Milestone</th><th>Status</th><th>Content</th><th>Tests</th></tr>
+<tr><td>M0 Scaffold</td><td class="ok">Done</td><td>Project layout, CI, plan, first architecture decision record (ADR)</td><td class="n">30</td></tr>
+<tr><td>M1 Data layer and indicators</td><td class="ok">Done</td><td>Provider interface, CSV/Parquet, quality checks, resampling; indicator library (Ichimoku, trend, momentum, volatility and volume groups; exact list per the README spec). Look-ahead tests mutation-verified.</td><td class="n">163</td></tr>
+<tr><td>M2 Regime and multi-timeframe</td><td class="ok">Done</td><td>7-label market-regime classifier, causal multi-timeframe alignment</td><td class="n">247</td></tr>
+<tr><td>M3 Strategies, scoring, risk, lifecycle</td><td class="ok">Done</td><td>Trend-following, breakout, mean-reversion strategies; rule-based scoring; hard risk engine with reason codes; signal lifecycle; SQLite store</td><td class="n">605</td></tr>
+<tr><td>M3.5 Market profile and pipeline</td><td class="ok">Done</td><td>Config-driven market profile (India, NSE-only for now), end-to-end signal pipeline on closed bars</td><td class="n">672</td></tr>
+<tr><td>M4a Backtester</td><td class="ok">Done</td><td>Real-data backtester (replays the live pipeline), metrics, random and buy-hold baselines, ablation configs</td><td class="n">694</td></tr>
+<tr><td>ML1 LightGBM filter</td><td class="warn">Done, not enabled</td><td>Candidate dataset, purged walk-forward CV, LightGBM vs logistic regression, single OOS replay, leakage audit</td><td class="n">740</td></tr>
+<tr><td>Results dashboard</td><td class="ok">Done</td><td>Self-contained HTML (equity, drawdown, breakdowns, ML section, Ichimoku-vs-trades section)</td><td class="n">813</td></tr>
+<tr><td>M4.1 Audit fixes</td><td class="ok">Done</td><td>Fixes from an independent audit (see 3.1)</td><td class="n">803–813</td></tr>
+<tr><td>M5 Live feed and Telegram alerts</td><td>Not started</td><td>Blocked on a feed decision and a fresh bot token</td><td>—</td></tr>
+<tr><td>M6 Bedrock AI review</td><td>Not started</td><td>Needs dedicated IAM credentials</td><td>—</td></tr>
+<tr><td>M7 Hardening and deployment</td><td>Not started</td><td>Planned on the existing host (systemd)</td><td>—</td></tr></table>
+
+<h3>3.1 Independent pre-forward-test audit (findings)</h3>
+<table><tr><th>Severity</th><th>Finding</th><th>Result</th></tr>
+<tr><td class="ok">Verified OK</td><td>No look-ahead (203 truncation checks, 0 mismatches); indicators match independent formulas (≤5e-10)</td><td>—</td></tr>
+<tr><td class="bad">Critical C1</td><td>R:R gate unreachable after costs (target 2.0R = minimum 2.0R)</td><td>Fixed: gate on gross geometry plus a separate COST_TOO_HIGH gate</td></tr>
+<tr><td class="bad">Critical C2</td><td>Default config published nothing, silently</td><td>Fixed: loud pre-flight failure</td></tr>
+<tr><td class="warn">High H1</td><td>Entry at signal-bar close (optimistic)</td><td>Fixed: fill at next bar open plus slippage</td></tr>
+<tr><td class="warn">High H2–H6</td><td>Late candidates dropped silently; no candidate log or indicator snapshot; history-length dependence; slow cycle (5.8 s); outcomes gross of costs</td><td>Fixed: stale candidates recorded, append-only candidate log, warm-up rules, cycle 1.2 s, net P&amp;L</td></tr>
+<tr><td>Medium</td><td>Holidays inferred; index untradable; store overwrites; empty-ADX crash; tick rounding</td><td>Mostly fixed; tick rounding and a history-invariance test deferred</td></tr></table>
+</section>
+
+<section id="nse-intraday"><h2>4. NSE intraday strategies (M4a, re-run after M4.1)</h2>
+<h3>Strategies</h3>
+<ul><li><b>Trend-following</b> (Ichimoku cloud with regime and higher-timeframe alignment; ADX threshold 25)</li><li><b>Breakout</b> (prior-range, previous-session and opening-range levels; relative-volume filter)</li><li><b>Mean-reversion</b> (RSI-based, sideways regime only, ignores higher timeframe)</li></ul>
+<p>Data: 5 stocks (RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS; NIFTY 50 as context), 1-minute bars resampled; in-sample (IS) 2022–2024, out-of-sample (OOS) 2025-01 → 2026-10-16.</p>
+<table><tr><th>Run</th><th>Period</th><th class="n">Trades</th><th class="n">Net / trade</th><th class="n">Gross / trade</th><th>Random baseline (net)</th></tr>
+<tr><td>First run, R:R gate switched off (diagnostic)</td><td>IS</td><td class="n">6,029</td><td class="n bad">−0.887R</td><td class="n">+0.031R</td><td>−0.920R</td></tr>
+<tr><td>First run, R:R gate switched off</td><td>OOS</td><td class="n">3,602</td><td class="n bad">−0.905R</td><td class="n">+0.017R</td><td>—</td></tr>
+<tr><td>First run, default config</td><td>IS+OOS</td><td class="n">0</td><td>—</td><td>—</td><td>Gate bug (C1), found by audit</td></tr>
+<tr><td>Post-M4.1 re-run, default (next-open fills)</td><td>IS</td><td class="n">88</td><td class="n bad">−0.258R</td><td class="n bad">−0.10R</td><td>−0.21R</td></tr>
+<tr><td>Post-M4.1 re-run, default</td><td>OOS</td><td class="n">36</td><td class="n bad">−0.149R</td><td class="n">+0.011R</td><td>−0.166R</td></tr></table>
+<div class="key"><b>Reading.</b> Gross edge is about zero. Costs (~0.21% round trip) are roughly 0.9R when stops are tiny (~0.2% of price). After M4.1, 38,478 of 48,147 candidates were rejected by the cost gate, leaving samples too small to conclude anything. The strategies barely beat random.</div>
+<p><b>Ichimoku cross-check.</b> Plotting an Ichimoku (9/26/52/26, 5m) view against the 124 post-M4.1 trades: 122 agreed with the cloud direction (it is already a trend-following entry condition), with average −0.23R. So Ichimoku adds no independent information over the existing rules.</p>
+</section>
+<section id="ml"><h2>5. ML signal filter (ML1) — LightGBM vs logistic regression</h2>
+<ul>
+<li><b>Idea:</b> train a model on every candidate setup to decide which to take.</li>
+<li><b>Design:</b> next-bar-open entry, all Indian costs, purged and embargoed walk-forward CV; model selection on 2022–24 only; frozen config committed before the single OOS run (2025-01 → 2026-10-16, run once at 14:43 UTC, 19 Oct).</li>
+<li><b>Sizing:</b> ₹10,000 per signal, with a size sweep to ₹5 lakh.</li>
+</ul>
+<table><tr><th>OOS variant (₹10k per trade)</th><th class="n">Trades</th><th class="n">Net P&amp;L (min(₹20,0.03%))</th><th class="n">Net P&amp;L (flat ₹20)</th></tr>
+<tr><td>Unfiltered</td><td class="n">4,666</td><td class="n bad">−₹1,05,576</td><td class="n bad">−₹2.95 lakh</td></tr>
+<tr><td>Logistic regression</td><td class="n">4,347</td><td class="n bad">−₹99,619</td><td class="n bad">−₹2.76 lakh</td></tr>
+<tr><td>LightGBM</td><td class="n">3,383</td><td class="n bad">−₹77,031</td><td class="n bad">−₹2.15 lakh</td></tr></table>
+<div class="key"><b>Why the high AUC (0.84–0.89) is misleading.</b> The leakage audit passed (shuffled-label AUC ≈ 0.5; no future features; purge correct). The AUC comes from barrier geometry: target distance vs volatility vs time left. An untrained formula scores AUC 0.825. Gross R is ≈ 0 in every prediction decile, so the model has <b>no directional edge</b>; it only filters out high-cost setups and loses less by trading less. The model was never wired to alerts.</div>
+</section>
+
+<section id="explore"><h2>6. Indicator and popular-algorithm search (NSE intraday, in-sample only)</h2>
+<ul>
+<li><b>Scope:</b> 281 distinct trials across 10 families, 5 stocks plus NIFTY, 5m / 15m / 60m. Selection on 2022–23, validation on 2024; data after 2024-12-31 was blocked in code (verified).</li>
+<li><b>Families:</b> opening-range breakout, VWAP pullback and bands, Supertrend, EMA crossovers, RSI(2)/RSI(14) mean reversion, Bollinger squeeze, MACD, Ichimoku cloud, NIFTY trend filter overlay, time-of-day filters; exits: fixed R, ATR trail, time.</li>
+<li><b>Rigour:</b> trials counted; deflated Sharpe; random and buy-hold baselines; ₹10k per trade.</li>
+</ul>
+<table><tr><th>Finding</th><th>Detail</th></tr>
+<tr><td class="bad">Nothing profitable after costs</td><td>In 2022–23 or 2024; deflated Sharpe ≈ 0.</td></tr>
+<tr><td>Least bad</td><td>Supertrend(10,3) on 1h with a NIFTY trend filter: about −0.05R / −0.015R to −0.03R net; gross +0.03R to +0.07R.</td></tr>
+<tr><td>Timeframe pattern</td><td>Longer is better but still negative: 5m −0.28R, 15m −0.15R, 60m −0.05R.</td></tr>
+<tr><td>NIFTY filter</td><td>Adds about +0.01 to +0.04R.</td></tr>
+<tr><td>Fixed ₹20 brokerage at ₹10k</td><td>About −0.19R per trade on its own.</td></tr></table>
+</section>
+
+<section id="nse-swing"><h2>7. NSE swing study (M4b) — daily and 4h, 24 stocks</h2>
+<ul>
+<li><b>Why:</b> intraday costs swamp the edge; the owner asked for 5–10% stops, delivery trades and a high-volume hypothesis.</li>
+<li><b>Design:</b> pre-registered pass criteria; ≤300 trials; delivery costs (STT 0.1% both legs, DP); brokerage ₹0 and ₹20; volume filter at 1.0 / 1.5 / 2.0× as an ablation; top-10 turnover sub-universe; OOS only if a variant passed.</li>
+</ul>
+<table><tr><th>Result</th><th>Detail</th></tr>
+<tr><td class="bad">0 / 300 passed</td><td>No OOS run (confirmed: no marker; pre-registration committed before the grid).</td></tr>
+<tr><td>High-volume hypothesis</td><td>Not supported: −0.10R in 2022–23, 0 in 2024.</td></tr>
+<tr><td>Best variant</td><td>Daily trend pullback + NIFTY &gt; EMA50, ATR×2 stop, 2R target: 2024 +0.32R on 71 trades, but deflated Sharpe 0.04 (needs 0.5). Probably market drift, plateau unverified.</td></tr>
+<tr><td>Brokerage ₹0 vs ₹20</td><td>Only about 0.01R difference.</td></tr></table>
+</section>
+<section id="crypto"><h2>8. Crypto (Solana, SOL/USDT) studies</h2>
+<p>Data: Binance 1-minute candles 2021-01 → 2026-09 (SOL, with BTC as a confirmation filter). Split: selection 2021–23 (later 2022–23), validation 2024, OOS 2025-26 used once and <b>only if a variant passed</b>. In studies 2–6 no variant passed, so no OOS test was run. CRYPTO1 and CRYPTO8 did run a single OOS/test evaluation on frozen candidates (CRYPTO1 to evaluate the ML filter and top configs; both marker files exist).</p>
+<table><tr><th>#</th><th>Study</th><th>What was tested</th><th class="n">Trials</th><th>Result</th></tr>
+<tr><td>1</td><td>CRYPTO1 — swing + ML</td><td>1h/4h swing rules on technicals + BTC confirmation, 5–10% stops, 1–20 day holds; LightGBM vs logistic regression filter</td><td class="n">292</td><td><span class="bad">0 passed</span> (validation sample ≤13 trades vs 60 needed). ML: no skill (in-sample AUC 0.35–0.52; OOS 0.46 / 0.55). Top configs OOS +0.10 / +0.28 / −0.32R on 14–15 trades, all negative in 2026. BTC rule OOS +0.18R (n=33) contradicts in-sample.</td></tr>
+<tr><td>2</td><td>CRYPTO2 — Ichimoku 5m/15m</td><td>Classic + crypto Ichimoku parameters, 3 entry types, BTC and higher-timeframe cloud ablation, cost gate (stop ≥ 4× round-trip cost)</td><td class="n">240</td><td><span class="bad">0 passed.</span> 5m all negative. 15m: in-sample median +0.21R then −0.23R in 2024 (overfit). Closest case driven by one +13R trade.</td></tr>
+<tr><td>3</td><td>CRYPTO3 — Owner's Ichimoku rules</td><td>Delayed cloud confirmation after a TK cross (R8), flat cross (R5), no spike chasing (R3), not stretched (R4), pullback (R7), big-candle profit-take (R6), RSI shorts, liquidity</td><td class="n">78</td><td><span class="bad">0 passed.</span> R8 worse than the old entries; R5 helps slightly; R3 / R6 / liquidity no help; RSI shorts untestable (0–1 trades). Short side loses less in 2024 but is negative in selection.</td></tr>
+<tr><td>3b</td><td>CRYPTO3b — fixed 5% stop</td><td>Same rules, 5% price stop, CMC Markets costs (0.34% spread, overnight holding)</td><td class="n">99</td><td><span class="bad">0 passed.</span> 15m all negative; longs lose. <b>1h shorts</b> are consistent (+0.11 to +0.30R in 2024, positive in-sample, 16 of 19 variants), but deflated Sharpe 0.34 &lt; 0.5 and the idea is contaminated by repeated looking. Best 2024 result: +A$1,377 with a A$442 drawdown.</td></tr>
+<tr><td>4</td><td>CRYPTO4 — 5m + 15m agreement + RSI</td><td>Require both timeframes to agree; RSI filters</td><td class="n">66</td><td><span class="bad">0 passed.</span> Agreement removes 25–90% of signals with no per-trade gain. RSI effect ±0.0x R. Longs −0.13 to −0.37R. Best short +0.009R on 139 trades, below random. Combined 2024: −A$1,744.</td></tr>
+<tr><td>5</td><td>CRYPTO5 — 2% take-profit, 2% stop, chop filter</td><td>2%/2% (1:1) primary, wider stops 3/4/5%, chop filters (cloud thickness, Kijun slope, choppiness index, ADX)</td><td class="n">64</td><td><span class="bad">0 passed.</span> 2/2: win rate 50% in-sample, 54% in 2024 vs break-even 54.3%. Wider stops raise wins and break-even equally. Chop-index filter on 1h shorts moved 2024 from −0.088R to +0.004R (≈ flat). No trial positive on the fixed-A$ metric in-sample.</td></tr>
+<tr><td>6</td><td>CRYPTO6 — ML on every 15m candle</td><td>~30 features, 2%/2% labels, logistic regression vs LightGBM, shallow tree rules, "when vs direction" AUC</td><td class="n">≤40</td><td><span class="bad">Failed.</span> CV AUC ≈ 0.50; 2024 AUC 0.53–0.56; 3 trades in 2024. A 2% move almost always happens; direction AUC only 0.54. Best quintile still below break-even.</td></tr>
+<tr><td>8</td><td>CRYPTO8 — controlled trend comparison</td><td>A: Donchian-20 on 4h + EMA200 with ATR stop and chandelier trail. B: daily 200-day MA long/cash vs buy-and-hold (spot and CFD). C: Owner's Ichimoku / SMA rules on 1h/4h with 2% stop and trail. Fixed parameters; train ≤2022, validate 2023–24, test 2025+ once.</td><td class="n">fixed</td><td><span class="bad">No strategy meets the promise criteria.</span> A (long): validation +21.6R (PF 1.79) → test −2.2R (negative without the top 3 trades). B (spot): test +17% vs buy-and-hold −38% on 5 trades: a drawdown filter, not an edge. B (CFD): killed by holding costs. C: all 16 cells negative.</td></tr></table>
+<p><i>(CRYPTO7, a set of custom exits, was drawn up but superseded by CRYPTO8 before it ran.)</i></p>
+
+<h3>8.1 Exploratory analyses (not counted as trials, but disclosed)</h3>
+<table><tr><th>Question</th><th>Answer</th></tr>
+<tr><td>Reverse the losing trades?</td><td>No. Gross edge ≈ 0, so reversing doubles the costs.</td></tr>
+<tr><td>Trade only when RSI &gt; 65?</td><td>Longs at RSI 65–70: in-sample +0.06R (n≈75) but 2024 −0.22R (n=19). RSI &gt; 70: −0.31 / −0.42R. Not supported.</td></tr>
+<tr><td>Add a 2% take-profit?</td><td>Win rate 70–74% but net −0.04 to −0.09R; break-even needs ~76% with a 5% stop.</td></tr>
+<tr><td>Winner-vs-loser patterns</td><td>Longs: no pattern holds in both periods. Shorts (mild): SOL below the 4h EMA50 wins more; oversold RSI and stretch far below the Kijun lose more.</td></tr>
+<tr><td>SMA 10/20/50 crosses</td><td>2/2 exits lose on all timeframes in 2022–23. Exit-on-opposite-cross on 1h/4h is positive in total but follows market direction (longs win in bull years, shorts in bear 2022); top 3 trades exceed 100% of the total.</td></tr>
+<tr><td>The "16 Dec" example</td><td>The rule fires often (534 times: 395 in-sample and 139 in 2024), ~50% wins; average win +0.93R vs average loss −1.0R, so about break-even before costs.</td></tr></table>
+<div class="key"><b>Crypto conclusion.</b> 8 studies, 0 passes. Costs on CMC (0.34% spread plus holding) are large relative to any gross edge. The only tentative lead is 1h shorts, which needs a fresh pre-registered paper test; further historical mining is not advised.</div>
+</section>
+<section id="method"><h2>9. Method and safeguards</h2>
+<table><tr><th>Safeguard</th><th>How it was applied</th></tr>
+<tr><td>Pre-registration</td><td>Rules, grid and pass criteria committed to git before any trial; commit order verified for every study.</td></tr>
+<tr><td>Data splits</td><td>NSE: in-sample 2022–24, OOS 2025-01 → 2026-10. Crypto: selection 2021/22–23, validation 2024, OOS 2025+. Code guards block later data in in-sample runs.</td></tr>
+<tr><td>OOS discipline</td><td>OOS marker file written once; no re-tuning afterwards.</td></tr>
+<tr><td>Multiple-testing control</td><td>Every trial counted; deflated Sharpe ratio required &gt; 0.5; neighbouring parameters must also be positive (plateau).</td></tr>
+<tr><td>Typical pass criteria</td><td>≥60 trades; net R &gt; 0 and still &gt; 0 at costs ×1.5; beats random by ≥0.1R; positive in both halves of 2024; drawdown reported.</td></tr>
+<tr><td>Execution realism</td><td>Fill at next bar open plus slippage; stop-first if stop and target hit in the same bar; gap-through-stop at the open; full costs.</td></tr>
+<tr><td>Leakage and look-ahead</td><td>203 truncation checks; indicator causality tests; label-shuffle test; purged and embargoed CV.</td></tr>
+<tr><td>Result retention</td><td>All runs archived with config, commit SHA, log and trades in <code>/workspace/data/results_archive/</code> with an INDEX.csv. Nothing deleted.</td></tr>
+<tr><td>Code quality</td><td>Mutation checks on core logic; CI gate (lint, types, tests, coverage); each merge reviewed critically.</td></tr></table>
+</section>
+
+<section id="mistakes"><h2>10. Problems, mistakes and deviations (disclosed)</h2>
+<ul>
+<li><b>Worker agents:</b> several background workers ended early because a text-only reply ends a run, or ran out of output length. Fixed by putting specs in files and requiring a tool call in every message. Finished workers sometimes kept running ("zombie" workers) and collided with their replacements; I now wait and verify first.</li>
+<li><b>My errors:</b> ran <code>git checkout main</code> inside a worker's tree (restored, no loss); a chained <code>gh pr merge</code> plus branch delete closed PR #4 (recovered; code is on main); a pytest pipe hid a failure in a gate chain (rule recorded).</li>
+<li><b>Stale numbers:</b> the first M4a results used signal-bar-close fills and are superseded by the post-M4.1 re-run.</li>
+<li><b>Holdout exposure:</b> an exploratory SMA per-year split printed 2025–26 data; disclosed (both sides were negative in 2025). 2024 crypto validation is also contaminated by repeated looking.</li>
+<li><b>Unreviewed items:</b> a post-OOS lint commit in CRYPTO1 touched 338 lines (stated behaviour-preserving, not independently verified). I mis-stated one break-even figure (58.5% vs the correct 54.3%) and one R value earlier; both corrected.</li>
+<li><b>Licensing:</b> Upstox terms of use for bulk historical data not reviewed; use is personal research only.</li>
+</ul>
+</section>
+
+<section id="next"><h2>11. Open items and options</h2>
+<table><tr><th>Item</th><th>State</th></tr>
+<tr><td>Live data feed (M5)</td><td>Not started. Needs a feed decision (Upstox read-only token if the account holder is a resident) and a fresh Telegram bot token.</td></tr>
+<tr><td>AI review (M6) and deployment (M7)</td><td>Not started; need dedicated IAM credentials and a verified Bedrock model ID.</td></tr>
+<tr><td>NSE F&amp;O</td><td>Daily futures data downloaded; no strategy tested on it.</td></tr>
+<tr><td>Holiday calendar</td><td>Inferred; verify against the official NSE list.</td></tr>
+<tr><td>Tick rounding of stops and targets</td><td>Deferred.</td></tr>
+<tr><td>Next step on record</td><td>Stop historical parameter-mining. Either (a) a pre-registered paper test on fresh data, such as the 1h SOL short idea, or (b) pause. Do not commit real money until a strategy passes OOS <i>and</i> a forward paper period (CMC demo account suggested; risk 1% per trade; daily loss stop; stop trading at −5% of the account).</td></tr></table>
+</section>
+</main>
+<footer>Generated 21 Oct 2026. Sources: project repo, STATUS.md, ADRs, agent task and state files, results archive.</footer>
+</body></html>
